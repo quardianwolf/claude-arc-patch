@@ -126,6 +126,12 @@ To use the in-page floating panel instead (fine for chatting, not for agent runs
 `arcPanelMode` to `"iframe"` in the extension's `chrome.storage.local`, e.g. from the service-worker console:
 `chrome.storage.local.set({ arcPanelMode: "iframe" })`. Set it to `"window"` (or remove it) to go back.
 
+The popup window is remembered in `chrome.storage.local`; if the extension reloads (update, developer reload) Arc
+replaces the window's now-invalid extension page with `chrome://new-tab-page/` ("This site can't be reached"), so on
+startup the patch restores such windows to the panel (or closes them if their tab is gone). The window is also closed
+when its tab closes. Separately, the Claude Code bridge creates its tab group in a new window at `chrome://newtab`,
+which Arc cannot render either; the shim rewrites that to `about:blank`.
+
 ### The stale-manifest problem (patch loads but nothing happens)
 
 Arc does not reliably re-parse `manifest.json` when you press **Reload** on an unpacked extension (this was

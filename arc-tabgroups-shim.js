@@ -333,6 +333,23 @@
     }
   } catch (e) {}
 
+  // chrome.windows.create({url:"chrome://newtab"}) — used by the Claude Code
+  // bridge when it creates its tab group (tabs_context_mcp createIfEmpty) —
+  // opens a window at chrome://new-tab-page/ in Arc, which Arc cannot render
+  // ("This site can't be reached / ERR_INVALID_URL"). Open a blank page instead;
+  // the bridge navigates the tab right after anyway.
+  try {
+    if (chrome.windows && chrome.windows.create) {
+      var nativeWindowsCreate = chrome.windows.create.bind(chrome.windows);
+      chrome.windows.create = function (data, cb) {
+        try {
+          if (data && typeof data.url === "string" && /^chrome:\/\/newtab\/?$/.test(data.url)) data = Object.assign({}, data, { url: "about:blank" });
+        } catch (e) {}
+        return cb ? nativeWindowsCreate(data, cb) : nativeWindowsCreate(data);
+      };
+    }
+  } catch (e) {}
+
   globalThis.__arcTabGroupsShimInstalled = true;
 
   // Debug: record whether the overrides actually took effect in this context.

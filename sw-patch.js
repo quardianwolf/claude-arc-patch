@@ -37,6 +37,34 @@ try {
 // The extension itself supports sidepanel.html?mode=window (used for its
 // scheduled tasks), and honours an explicit tabId parameter.
 const _panelWindows = new Map(); // tabId -> windowId
+const PANEL_WINDOWS_KEY = "arcPanelWindows";
+
+function _persistPanelWindows() {
+  try { chrome.storage.local.set({ [PANEL_WINDOWS_KEY]: Object.fromEntries(_panelWindows) }); } catch (e) {}
+}
+
+// When the extension reloads (update, developer reload), Arc replaces the
+// panel window's now-invalid extension page with chrome://new-tab-page/
+// ("This site can't be reached / ERR_INVALID_URL") and the window lingers.
+// Restore such windows to the panel (or close them if their tab is gone).
+(async () => {
+  try {
+    const saved = (await chrome.storage.local.get(PANEL_WINDOWS_KEY))[PANEL_WINDOWS_KEY] || {};
+    for (const [tabIdStr, windowId] of Object.entries(saved)) {
+      const tabId = Number(tabIdStr);
+      let win = null;
+      try { win = await chrome.windows.get(windowId, { populate: true }); } catch (e) { continue; }
+      const t = win.tabs && win.tabs[0];
+      const url = chrome.runtime.getURL(`sidepanel.html?mode=window&tabId=${encodeURIComponent(tabId)}`);
+      let hostAlive = true;
+      try { await chrome.tabs.get(tabId); } catch (e) { hostAlive = false; }
+      if (!hostAlive || !t) { try { await chrome.windows.remove(windowId); } catch (e) {} continue; }
+      if (t.url !== url) { try { await chrome.tabs.update(t.id, { url }); } catch (e) {} }
+      _panelWindows.set(tabId, windowId);
+    }
+  } catch (e) {}
+  _persistPanelWindows();
+})();
 
 async function _openPanelWindow(tabId) {
   const existing = _panelWindows.get(tabId);
@@ -64,6 +92,7 @@ async function _openPanelWindow(tabId) {
   const win = await chrome.windows.create({ url, type: "popup", focused: true, ...bounds });
   if (win?.id != null) {
     _panelWindows.set(tabId, win.id);
+    _persistPanelWindows();
     // Arc ignores the bounds given to windows.create for popups; applying
     // them again with windows.update (after the window exists) works.
     if (bounds.left != null) {
@@ -78,6 +107,12 @@ chrome.windows.onRemoved.addListener(windowId => {
   for (const [tabId, wid] of _panelWindows) {
     if (wid === windowId) _panelWindows.delete(tabId);
   }
+  _persistPanelWindows();
+});
+// Close the panel window when its tab goes away.
+chrome.tabs.onRemoved.addListener(tabId => {
+  const wid = _panelWindows.get(tabId);
+  if (wid != null) { _panelWindows.delete(tabId); _persistPanelWindows(); chrome.windows.remove(wid).catch(() => {}); }
 });
 
 // ── In-page floating panel (iframe) ─────────────────────────────────
